@@ -1,0 +1,425 @@
+SIMATS ONLINE PROGRAMMING LAB
+PYTHON PROGRAMMING
+ASSIGNMENT 5
+Data Acquisition, Cleaning, Analysis and AI Applications
+Student Name
+Register Number
+Rajavignesh M
+Course
+1965260138
+Assignment
+Python Programming
+CSA08 – Assignment 5
+GitHub Repository Link: ______________________________________________
+Important: The assignment requires a working GitHub repository, executed programs, screenshots and a README. Add your repository URL and actual
+execution evidence. Generate benchmark timings on your computer; no timings are invented here.
+Page 1
+CSA08 – Python Programming | Assignment 5
+PART A: DATA AND PROGRAM DESIGN
+This report follows ACQUIRE fi CLEAN fi STORE fi QUERY fi VISUALISE fi PROFILE fi CHALLENGE fi INTERPRET. The
+case study is a city air-quality monitoring network with 12 stations and citizen complaints.
+Assumptions: PM2.5 and PM10 are measured in µg/m³. Temperature is converted to °C. For the supplied exercise, PM2.5 values
+below zero and above 999 are rejected. Other pollutant limits must be confirmed against sensor specifications.
+A1. Design the Data Acquisition
+A1.1 Inspect the Source
+A station CSV contains one row per station reading at a date and hour. Expected columns: station, date, hour, PM2.5, PM10, NOn
+and temperature. Station identity must be present in each row or supplied by file metadata.
+Problem
+Example
+Detection / handling
+Missing value
+Negative value
+PM2.5 blank or NA
+PM2.5 = -5
+Treat as missing; count and document imputation.
+Reject and log invalid row.
+High value
+Duplicate
+PM2.5 = 1500
+Same station/date/hour twice
+Reject using configured upper limit.
+Enforce unique key.
+Mixed units
+Wrong type
+86°F instead of °C
+PM2.5 = error
+Convert to Celsius.
+Catch numeric conversion failure.
+Inconsistent station
+Invalid date/hour
+' adyar ' / 'Adyar'
+Bad date or hour 27
+Trim and map canonical name.
+Validate date and 0–23 hour range.
+A1.2 Design the Storage
+Use a stations table for metadata and readings for time-series measurements. A foreign key links them; a unique constraint prevents
+duplicate station/time readings.
+CREATE TABLE stations (
+ station_id INTEGER PRIMARY KEY,
+ station_name TEXT NOT NULL UNIQUE,
+ source_temperature_unit TEXT NOT NULL
+);
+CREATE TABLE readings (
+ reading_id INTEGER PRIMARY KEY,
+ station_id INTEGER NOT NULL,
+ reading_date TEXT NOT NULL,
+ reading_hour INTEGER NOT NULL,
+ pm25 REAL, pm10 REAL, no2 REAL, temperature_c REAL,
+ FOREIGN KEY(station_id) REFERENCES stations(station_id),
+ UNIQUE(station_id, reading_date, reading_hour)
+);
+CREATE INDEX idx_readings_station_date
+ON readings(station_id, reading_date);
+Mapping: station text is mapped to station_id; date is YYYY-MM-DD; hour is an integer; pollutant values are REAL; temperature is
+converted to °C. Missing measurements become NULL. Rejected records and reasons are retained in an error log.
+A1.3 CSV or SQL?
+Question
+CSV approach
+SQLite approach
+Average PM2.5 at one station in
+October
+Read files, filter and calculate mean each time.
+AVG with station/date conditions; index speeds filtering.
+Highest daily station mean
+Read and aggregate all station files.
+GROUP BY station/date and sort by average.
+Worst pollution hour
+Read all rows and group in Python.
+GROUP BY reading_hour and order by AVG(pm25).
+Alternative: pandas reads the required CSV files into a DataFrame for each question, filters and groups. Full scan is O(n) per
+question and loading all rows costs O(n) memory. An indexed SQL lookup is approximately O(log n + k), where k is matching rows.
+SQLite supports repeated queries without loading all records into Python. CSV is useful for exchange and one-time analysis.
+A2. Design the Cleaning and Normalisation
+A2.1 Cleaning Rules
+Issue
+Rule
+Missing
+Store NULL; use median only for justified isolated gaps; do not
+automatically forward-fill.
+Reason
+Median resists outliers; forward fill can hide rapid
+changes.
+Impossible
+Reject negative values and PM2.5 > 999; log row and reason.
+Avoids sensor faults corrupting averages.
+Duplicates
+Keep one row per station/date/hour; log conflicts.
+Avoids double counting.
+Page 2
+CSA08 – Python Programming | Assignment 5
+Issue
+Fahrenheit
+Rule
+Reason
+°C = (°F - 32) × 5/9.
+A2.2 Normalisation
+Makes station temperatures comparable.
+Min–max: x¢ = (x - xmin)/(xmax - xmin). It scales PM2.5 to 0–1. If max = min, return zero to avoid division by zero.
+Z-score: z = (x - m)/s, where m is mean and s is standard deviation. It centres values around zero and is useful for comparing
+differently scaled variables. If s = 0, return zero. For machine learning, calculate scaling parameters from training data only.
+A2.3 Formatting
+• Dates: YYYY-MM-DD; timestamps: YYYY-MM-DD HH:00:00.
+• Station names: trim whitespace and use canonical names.
+• Numbers: REAL values; temperature in °C; missing values represented by NULL.
+Alternative: dropping missing rows is O(n), but may bias averages if missingness is systematic. Forward fill is O(n) and uses little
+extra memory but can repeat stale values. Median calculation by sorting is O(n log n) time and O(n) memory. Report dropped and
+imputed counts.
+A3. Design the Analysis and Visualisation
+A3.1 Chart Choices
+Question
+Chart
+Reason
+Monthly PM2.5 trend
+Station comparison
+Line
+Bar
+Shows ordered changes and pollution episodes.
+Compares category averages.
+Temperature vs PM2.5
+Worst hours
+Scatter
+Bar by hour
+Shows association, clusters and outliers, not causation.
+Compares hourly mean and highlights high-pollution periods.
+A3.2 Daily Summary Table
+Fields: station_id, reading_date, pm25_min, pm25_max, pm25_mean and valid_reading_count. Produce with:
+SELECT station_id, reading_date,
+ MIN(pm25) AS pm25_min, MAX(pm25) AS pm25_max,
+ AVG(pm25) AS pm25_mean, COUNT(pm25) AS valid_reading_count
+FROM readings
+GROUP BY station_id, reading_date;
+COUNT(pm25) ignores NULL values. A Python alternative keeps a dictionary keyed by (station, date) and updates min, max, sum
+and count. Both scan n readings in O(n). A running dictionary uses O(g) memory for g station-day groups; storing all rows first uses
+O(n).
+A4. Plan Debugging and Profiling
+A4.1 Debugging Plan
+• print(): inspect raw rows, parsed values and rejected records on a small test file.
+• assert: check invariants such as hour 0–23 and accepted PM2.5 non-negative.
+• logging: DEBUG for diagnostics, INFO for counts, WARNING for rejected rows, ERROR for failures.
+• pdb/IDE debugger: set breakpoints in parsing/conversion and inspect variables.
+A4.2 Profiling Plan
+• time.perf_counter(): measure elapsed time around reading, cleaning, insertion and plotting.
+• timeit: repeat small functions to compare alternatives.
+• cProfile: profile the whole program and sort by cumulative time.
+Alternative: print-only debugging creates many console writes and noise. Logging has overhead too, but levels allow DEBUG
+messages to be disabled. A debugger is interactive and should not be left running in production. Configure log levels and remove
+temporary prints.
+A5. Design an AI Application for Citizen Complaints
+A5.1 Sentiment and Summary
+Page 3
+CSA08 – Python Programming | Assignment 5
+Lexicon sentiment: lowercase and tokenize. Add +1 for positive words and -1 for negative words. If the previous word is
+not/never/no, reverse the current word's score. Total > 0 is positive, < 0 negative, and 0 neutral. It handles simple 'not helpful'
+phrases but not sarcasm or complex grammar.
+Extractive summary: split into sentences, remove stop words, count important words, score sentences using those frequencies, and
+select the highest-scoring sentence(s) in original order. It selects existing sentences.
+A5.2 Basic Chatbot
+Match pollutant keywords, station names and date phrases. Validate station/date, map station to station_id and run a parameterised
+query:
+SELECT AVG(pm25) FROM readings
+WHERE station_id = ? AND reading_date = ?;
+Reply with value, unit, date and valid-reading count, or say no data is available. Limitations: fixed vocabulary/date formats, spelling
+errors, ambiguous questions and no human-like context understanding.
+Alternative: Naive Bayes learns from labelled examples and can generalise beyond a fixed word list, but needs representative
+training data. A pre-trained language model can understand context better but uses more memory and inference time. Lexicon
+scoring is O(w) per complaint with small memory; model inference costs more. Evaluate accuracy on labelled local complaints.
+PART B: IMPLEMENTATION & EXPERIMENTAL INVESTIGATION
+Run the following code locally and include screenshots and measured results. The snippets complete the required TODO exercises.
+B1. Cleaning Pipeline
+import csv, io
+RAW = "station,date,pm25\\nAdyar,2026-10-01,48\\nAdyar,2026-10-02,NA\\nAdyar,2026-10-03,\\nGuindy,2026-10-01,95\\nGuindy,2026-10-02,-5\\nGuindy,2026-10-03,121\\nAdyar,2026-10-04,1200\\n"
+def load_clean(text):
+    rows = []
+    for row in csv.DictReader(io.StringIO(text)):
+        value = (row.get("pm25") or "").strip()
+        if value.upper() in ("", "NA"):
+            continue
+        try:
+            pm = float(value)
+        except ValueError:
+            continue
+        if pm < 0 or pm > 999:
+            continue
+        rows.append((row["station"].strip(), row["date"], pm))
+    return rows
+def min_max(values):
+    if not values: return []
+    lo, hi = min(values), max(values)
+    if hi == lo: return [0.0 for _ in values]
+    return [round((v-lo)/(hi-lo), 3) for v in values]
+clean = load_clean(RAW)
+print(clean)
+print(min_max([pm for _, _, pm in clean]))
+Expected output for the original six rows: [('Adyar', '2026-10-01', 48.0), ('Guindy', '2026-10-01', 95.0), ('Guindy', '2026-10-03', 121.0)]
+and [0.0, 0.644, 1.0]. The additional 1200 row is rejected by the upper-limit check. Before cleaning, input includes NA, blank, -5 and
+1200; after cleaning, only valid rows remain.
+B1.3 Store and Query
+import sqlite3
+readings = [("Adyar","2026-10-01",48.0),
+            ("Guindy","2026-10-01",95.0),
+            ("Guindy","2026-10-03",121.0)]
+con = sqlite3.connect("air_quality.db")
+con.execute("CREATE TABLE IF NOT EXISTS aq (station TEXT, day TEXT, pm25 REAL, PRIMARY KEY(station,day))")
+con.executemany("INSERT OR REPLACE INTO aq VALUES (?, ?, ?)", readings)
+con.commit()
+for station in ("Adyar", "Guindy"):
+    avg = con.execute("SELECT AVG(pm25) FROM aq WHERE station=? AND day BETWEEN ? AND ?",
+                      (station,"2026-10-01","2026-10-31")).fetchone()[0]
+    print(station, avg)
+con.close()
+B1.4 Visualisation
+# df columns: date, station, pm25, temperature_c, hour
+import matplotlib.pyplot as plt
+df.groupby("date")["pm25"].mean().plot(kind="line", marker="o", title="Daily PM2.5 Trend")
+plt.xlabel("Date"); plt.ylabel("PM2.5 (µg/m³)")
+plt.tight_layout(); plt.savefig("pm25_trend.png"); plt.close()
+df.groupby("station")["pm25"].mean().plot(kind="bar", title="Average PM2.5 by Station")
+plt.xlabel("Station"); plt.ylabel("PM2.5 (µg/m³)")
+plt.tight_layout(); plt.savefig("station_comparison.png"); plt.close()
+df.plot.scatter(x="temperature_c", y="pm25", title="Temperature vs PM2.5")
+Page 4
+CSA08 – Python Programming | Assignment 5
+plt.xlabel("Temperature (°C)"); plt.ylabel("PM2.5 (µg/m³)")
+plt.tight_layout(); plt.savefig("temperature_scatter.png"); plt.close()
+df.groupby("hour")["pm25"].mean().plot(kind="bar", title="Mean PM2.5 by Hour")
+plt.xlabel("Hour"); plt.ylabel("PM2.5 (µg/m³)")
+plt.tight_layout(); plt.savefig("hourly_pollution.png"); plt.close()
+Interpretation: the line chart identifies dates with rising/falling PM2.5; the station chart identifies higher-average stations; the scatter
+plot shows association but not causation; the hourly chart identifies high-pollution hours. Replace these general statements with
+observations from your generated charts.
+B2. Adversarial Data
+import csv
+def inspect_csv(path):
+    try:
+        with open(path, "r", encoding="utf-8", newline="") as f:
+            sample = f.read(2048)
+            if not sample.strip(): return "ERROR: empty file"
+            f.seek(0)
+            reader = csv.DictReader(f)
+            required = {"station","date","pm25"}
+            missing = required - set(reader.fieldnames or [])
+            if missing: return "ERROR: missing columns: " + ", ".join(sorted(missing))
+            return "OK: columns found"
+    except UnicodeDecodeError:
+        return "ERROR: unsupported encoding; use documented source encoding"
+    except OSError as exc:
+        return "ERROR: " + str(exc)
+# Wrong delimiter often creates one combined header; required-column check catches it.
+A missing column is reported before processing. A semicolon file read as comma-separated usually has one combined header and is
+reported as missing columns. Non-UTF-8 data raises UnicodeDecodeError; reopen using its documented encoding (for example
+cp1252). An empty file is reported explicitly.
+B2.2 SQL Injection and Parameterised Query
+import sqlite3
+readings = [("Adyar","2026-10-01",48.0),("Guindy","2026-10-01",95.0),
+            ("Guindy","2026-10-03",121.0),("Adyar","2026-10-04",60.0)]
+con = sqlite3.connect(":memory:")
+con.execute("CREATE TABLE aq (station TEXT, day TEXT, pm25 REAL)")
+con.executemany("INSERT INTO aq VALUES (?, ?, ?)", readings)
+con.commit()
+def station_average(name):
+    row = con.execute("SELECT AVG(pm25) FROM aq WHERE station = ?", (name,)).fetchone()
+    return row[0]
+print(station_average("Adyar"), station_average("Guindy"))
+print(station_average("Adyar' OR '1'='1"))
+con.close()
+Expected output: 54.0 108.0 and None. The placeholder treats input as a literal station name. No station has that exact name, so
+SQL AVG returns NULL (Python None). Concatenating user input into SQL can change the WHERE clause and expose unintended
+rows. Parameterised queries prevent input from becoming SQL.
+executemany() inserts a sequence using one parameterised operation and reduces Python/database call overhead. Both
+approaches are O(n) asymptotically; actual speed depends on transaction settings. Use one transaction and placeholders.
+B3. Loops vs Libraries vs SQL
+from collections import defaultdict
+import pandas as pd, sqlite3
+# rows = list of (station, day, pm25)
+sums, counts = {}, {}
+for station, day, value in rows:
+    key = (station, day)
+    sums[key] = sums.get(key, 0.0) + value
+    counts[key] = counts.get(key, 0) + 1
+loop_means = {k: sums[k]/counts[k] for k in sums}
+df = pd.DataFrame(rows, columns=["station","day","pm25"])
+pandas_means = df.groupby(["station","day"])["pm25"].mean().to_dict()
+db = sqlite3.connect(":memory:")
+db.execute("CREATE TABLE readings(station TEXT, day TEXT, pm25 REAL)")
+db.executemany("INSERT INTO readings VALUES (?, ?, ?)", rows)
+sql_means = {(s,d):m for s,d,m in db.execute(
+    "SELECT station, day, AVG(pm25) FROM readings GROUP BY station, day")}
+assert loop_means.keys() == pandas_means.keys() == sql_means.keys()
+for key in loop_means:
+    assert abs(loop_means[key]-pandas_means[key]) < 1e-9
+    assert abs(loop_means[key]-sql_means[key]) < 1e-9
+db.close()
+Generate 1, 12 and 120 stations for 365 days × 24 readings = 8,760 readings/station. Time all methods on the same input using
+time.perf_counter(); record actual results below. Do not substitute guessed timings.
+Stations
+Readings
+Python loop (s)
+pandas (s)
+1
+8,760
+Measure locally
+Measure locally
+SQL (s)
+Measure locally
+Page 5
+CSA08 – Python Programming | Assignment 5
+Stations
+Readings
+Python loop (s)
+pandas (s)
+SQL (s)
+12
+120
+105,120
+1,051,200
+Measure locally
+Measure locally
+Measure locally
+Measure locally
+Measure locally
+Measure locally
+Use cProfile on the loop implementation and report the function with the largest cumulative time from your run. For one-time small
+analysis, loops are understandable; pandas is convenient for exploration; SQLite suits repeated automated reports. A running
+sum/count dictionary is O(n) time and O(number of station-day groups) space; storing every reading is O(n) space.
+B4. Final Engineering Decision
+B4.1 Sentiment Implementation
+POSITIVE = {"good","clean","fast","helpful","improved"}
+NEGATIVE = {"bad","dirty","slow","rude","smoke","broken"}
+NEGATORS = {"not","never","no"}
+def score(text):
+    words = text.lower().replace("."," ").replace(","," ").split()
+    total = 0
+    for i, word in enumerate(words):
+        value = 1 if word in POSITIVE else -1 if word in NEGATIVE else 0
+        if i > 0 and words[i-1] in NEGATORS: value = -value
+        total += value
+    return total
+def label(text):
+    s = score(text)
+    return "positive" if s > 0 else "negative" if s < 0 else "neutral"
+for complaint in [
+ "Roads are clean and the bus was fast.",
+ "Smoke from the factory, air is bad.",
+ "The staff were not helpful.",
+ "Not bad, service improved."
+]:
+    print(f"{label(complaint):8} | {complaint}")
+Expected labels: positive, negative, negative and positive. A failure example is 'Great, another day breathing smoke': sarcasm may
+be labelled negative or positive depending on the lexicon and context. 'Not only slow but also helpful' can also be misread by the
+simple negation rule.
+For the required 50 complaints, manually label at least 50 examples, run the scorer and count matching labels. Agreement =
+(matches ÷ 50) × 100%. Record your actual match count and percentage. Four sample sentences are demonstrations only and do
+not satisfy the 50-complaint experiment.
+B4.2 Database Index
+CREATE INDEX IF NOT EXISTS idx_aq_station_day ON aq(station, day);
+EXPLAIN QUERY PLAN
+SELECT AVG(pm25) FROM aq
+WHERE station='Adyar'
+AND day BETWEEN '2026-10-01' AND '2026-10-31';
+Measure the same query before and after index creation using time.perf_counter(), repeat it and compare median/average duration.
+An index may speed selective searches but uses disk and slows inserts slightly. Tiny tables may show no measurable improvement.
+B4.3 Production Decision
+For 112 stations reporting every 15 minutes, the network receives 112 × 4 = 448 readings/hour or 10,752/day. Use validated,
+indexed SQLite for a modest single-machine deployment, with transactions and backups. If concurrent writers, availability or data
+volume exceed SQLite's practical limits, migrate to PostgreSQL. Keep raw files for audit, store cleaned data in a canonical schema
+and retain rejected rows with reasons.
+Schedule ingestion, validate units/ranges, use parameterised inserts, and calculate daily/monthly summaries in SQL. For 50,000
+complaints/month, lexicon scoring is cheap and explainable, but use manually labelled agreement results to decide. If accuracy is
+low or context matters, train and validate a classifier or use a pre-trained model with privacy/cost controls.
+Alternative summary: selecting the first k sentences is fast and needs little scoring memory, but can miss the main point later in the
+complaint. Frequency-based extractive summarisation processes words in approximately O(w) time and stores word frequencies
+proportional to vocabulary size. Compare both on the same 50 complaints.
+APPENDIX: Additional functions
+def fahrenheit_to_celsius(f):
+    return (f - 32) * 5 / 9
+def z_score(values):
+    if not values: return []
+    mean = sum(values) / len(values)
+    variance = sum((x-mean)**2 for x in values) / len(values)
+    sd = variance ** 0.5
+    return [0.0 if sd == 0 else (x-mean)/sd for x in values]
+import re
+STOP = {"the","a","an","is","are","was","were","to","of","and","in","on","for","it"}
+def summarize(text):
+Page 6
+CSA08 – Python Programming | Assignment 5
+    sentences = re.split(r"(?<=[.!?])\\s+", text.strip())
+    words = [w.lower() for w in re.findall(r"[A-Za-z]+", text)
+             if w.lower() not in STOP]
+    freq = {}
+    for w in words: freq[w] = freq.get(w, 0) + 1
+    if not sentences: return ""
+    def rank(sentence):
+        return sum(freq.get(w.lower(), 0) for w in re.findall(r"[A-Za-z]+", sentence))
+    return max(sentences, key=rank)
+Submission Checklist
+• Add your working GitHub repository URL.
+• Create Task01–Task04/Q1–Q4 folders with source, input and screenshots.
+• Include README.md, Python version, library versions and requirements.txt.
+• Run every code sample and save actual output screenshots.
+• Generate four charts and record real timing/profile results.
+• Prepare 50 manually labelled complaints and calculate agreement.
+• Check name and register number on the cover page.
+End of Assignment 5 report.
+Page 7
+CSA08 – Python Programming | Assignment 5
